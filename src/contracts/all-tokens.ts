@@ -1,8 +1,9 @@
 // Auto-generated from pangolin.tokenlist.json
-// Total tokens: 263
+// Total tokens: 263 + manual additions for old/deprecated tokens
 export const ALL_PANGOLIN_TOKENS = [
   { symbol: 'PNG', address: '0x60781C2586D68229fde47564546784ab3fACA982', name: 'Pangolin' },
   { symbol: 'WAVAX', address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', name: 'Wrapped AVAX' },
+  { symbol: 'WETH.e(Old)', address: '0xf20d962a6c8f70c731bd838a3a388D7d48fA6e15', name: 'Wrapped Ether (Old)' },
   { symbol: 'AVE', address: '0x78ea17559B3D2CF85a7F9C2C704eda119Db5E6dE', name: 'Avaware' },
   { symbol: 'CABAG', address: '0xdb333724fAE72b4253FC3d44c8270CBBC86d147b', name: 'Cabbage.Cash' },
   { symbol: 'YTS', address: '0x488F73cddDA1DE3664775fFd91623637383D6404', name: 'YetiSwap' },
