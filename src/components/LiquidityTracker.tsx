@@ -1027,14 +1027,29 @@ export const LiquidityTracker: React.FC = () => {
           <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔍</div>
           <p className="text-gray-400 text-sm font-medium">No liquidity positions found</p>
           <p className="text-gray-400 text-xs mt-2">
-            Your wallet doesn't have any LP tokens in the scanned
+            No LP tokens found in your wallet
           </p>
           <p className="text-gray-400 text-xs">
-            Our tool scans all major token pairs dynamically.
+            (This scans for unstaked LP tokens only)
           </p>
-          <p className="text-gray-400 text-xs mt-3">
-            💡 If you have LP tokens in other pools, they may not be detected yet.
-          </p>
+          
+          <div style={{ 
+            marginTop: '20px',
+            padding: '12px',
+            background: 'rgba(255, 136, 0, 0.1)',
+            borderRadius: '8px',
+            border: '1px solid rgba(255, 136, 0, 0.3)'
+          }}>
+            <p className="text-orange-400 text-xs font-medium mb-1">
+              🌾 Do you have STAKED LP tokens?
+            </p>
+            <p className="text-gray-400 text-xs">
+              If your LP tokens are staked in farms, use the "Staking Recovery" tab above.
+            </p>
+            <p className="text-gray-400 text-xs mt-1">
+              Staked LP tokens won't appear here because they're locked in the MiniChef contract.
+            </p>
+          </div>
         </div>
       )}
     </div>
