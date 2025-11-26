@@ -665,15 +665,21 @@ export const LiquidityTracker: React.FC = () => {
                 if (result.result && result.result !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
                   const pairAddress = '0x' + result.result.slice(-40)
                   
-                  // Check user balance in this pair
+                  // Check BOTH wallet balance AND staked balance
                   const balanceHex = await checkPairBalance(pairAddress, userAddress)
-                  const balance = parseInt(balanceHex, 16)
+                  const walletBalance = parseInt(balanceHex, 16)
                   
-                  if (balance > 0 && balanceHex !== '0x0' && balanceHex !== '0x') {
-                    const balanceInEther = formatEther(BigInt(balance))
+                  // Also check if user has this LP staked in MiniChef
+                  const stakedBalance = await checkStakedBalance(pairAddress, userAddress)
+                  
+                  const totalBalance = walletBalance + stakedBalance
+                  
+                  if (totalBalance > 0) {
+                    const balanceInEther = formatEther(BigInt(totalBalance))
                     const formattedBalance = parseFloat(balanceInEther).toFixed(6)
                     
-                    console.log(`✅ Found LP: ${tokenA.symbol}/${tokenB.symbol} - ${formattedBalance} LP`)
+                    const stakeStatus = stakedBalance > 0 ? ' (includes staked)' : ''
+                    console.log(`✅ Found LP: ${tokenA.symbol}/${tokenB.symbol} - ${formattedBalance} LP${stakeStatus}`)
                     
                     return {
                       pairAddress,
@@ -724,10 +730,14 @@ export const LiquidityTracker: React.FC = () => {
     
     setIsLoading(true)
     setLiquidityPositions([]) // Clear old positions first
+    stakedBalanceCache = null // Reset staked balance cache
     
     try {
       console.log('=== Starting dynamic liquidity position discovery ===')
       console.log('User address:', address)
+      
+      // Pre-fetch all staked balances from MiniChef
+      await getAllStakedBalances(address)
       
       // Dynamically discover user's pairs
       const foundPositions = await discoverUserPairs(address)
@@ -753,6 +763,111 @@ export const LiquidityTracker: React.FC = () => {
       setScanTotal(0)
       setFoundCount(0)
     }
+  }
+
+  // Cache for MiniChef staked balances
+  let stakedBalanceCache: Map<string, number> | null = null
+  
+  // Helper function to get ALL staked balances from MiniChef at once
+  const getAllStakedBalances = async (userAddress: string): Promise<Map<string, number>> => {
+    if (stakedBalanceCache) return stakedBalanceCache
+    
+    const stakedBalances = new Map<string, number>()
+    
+    try {
+      console.log('🌾 Checking MiniChef for staked LP tokens...')
+      
+      // Get pool length
+      const poolLengthResponse = await fetch('https://api.avax.network/ext/bc/C/rpc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'eth_call',
+          params: [{
+            to: CONTRACTS.MINICHEF_V2,
+            data: '0x081e3eda' // poolLength()
+          }, 'latest'],
+          id: 1
+        })
+      })
+      
+      const poolLengthResult = await poolLengthResponse.json()
+      const poolLength = parseInt(poolLengthResult.result || '0x0', 16)
+      
+      console.log(`Found ${poolLength} pools in MiniChef`)
+      
+      // Check all pools in parallel
+      const poolChecks = []
+      for (let poolId = 0; poolId < poolLength; poolId++) {
+        poolChecks.push((async () => {
+          try {
+            // Get pool info and user info in parallel
+            const [poolInfoResponse, userInfoResponse] = await Promise.all([
+              fetch('https://api.avax.network/ext/bc/C/rpc', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  jsonrpc: '2.0',
+                  method: 'eth_call',
+                  params: [{
+                    to: CONTRACTS.MINICHEF_V2,
+                    data: `0x1526fe27${poolId.toString(16).padStart(64, '0')}` // poolInfo(uint256)
+                  }, 'latest'],
+                  id: poolId * 2
+                })
+              }),
+              fetch('https://api.avax.network/ext/bc/C/rpc', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  jsonrpc: '2.0',
+                  method: 'eth_call',
+                  params: [{
+                    to: CONTRACTS.MINICHEF_V2,
+                    data: `0x93f1a40b${poolId.toString(16).padStart(64, '0')}${userAddress.slice(2).padStart(64, '0')}` // userInfo(uint256,address)
+                  }, 'latest'],
+                  id: poolId * 2 + 1
+                })
+              })
+            ])
+            
+            const [poolInfoResult, userInfoResult] = await Promise.all([
+              poolInfoResponse.json(),
+              userInfoResponse.json()
+            ])
+            
+            if (poolInfoResult.result && userInfoResult.result) {
+              const lpToken = '0x' + poolInfoResult.result.slice(26, 66)
+              const stakedAmount = parseInt(userInfoResult.result.slice(0, 66), 16)
+              
+              if (stakedAmount > 0) {
+                stakedBalances.set(lpToken.toLowerCase(), stakedAmount)
+                console.log(`✅ Staked in pool ${poolId}: ${lpToken} - ${stakedAmount}`)
+              }
+            }
+          } catch (e) {
+            // Skip failed pools
+          }
+        })())
+      }
+      
+      await Promise.allSettled(poolChecks)
+      
+      console.log(`Found ${stakedBalances.size} staked positions`)
+      stakedBalanceCache = stakedBalances
+      
+    } catch (error) {
+      console.error('Error getting staked balances:', error)
+    }
+    
+    return stakedBalances
+  }
+  
+  // Helper function to check staked balance for a specific pair
+  const checkStakedBalance = async (pairAddress: string, userAddress: string): Promise<number> => {
+    const stakedBalances = await getAllStakedBalances(userAddress)
+    return stakedBalances.get(pairAddress.toLowerCase()) || 0
   }
 
   // Helper function to check balance for a single pair
@@ -1027,29 +1142,13 @@ export const LiquidityTracker: React.FC = () => {
           <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔍</div>
           <p className="text-gray-400 text-sm font-medium">No liquidity positions found</p>
           <p className="text-gray-400 text-xs mt-2">
-            No LP tokens found in your wallet
+            No LP tokens found in your wallet or staked in farms
           </p>
-          <p className="text-gray-400 text-xs">
-            (This scans for unstaked LP tokens only)
+          <p className="text-gray-400 text-xs mt-3">
+            ✓ Scanned {ALL_PANGOLIN_TOKENS.length} tokens for pairs<br/>
+            ✓ Checked wallet balances<br/>
+            ✓ Checked MiniChef staked positions
           </p>
-          
-          <div style={{ 
-            marginTop: '20px',
-            padding: '12px',
-            background: 'rgba(255, 136, 0, 0.1)',
-            borderRadius: '8px',
-            border: '1px solid rgba(255, 136, 0, 0.3)'
-          }}>
-            <p className="text-orange-400 text-xs font-medium mb-1">
-              🌾 Do you have STAKED LP tokens?
-            </p>
-            <p className="text-gray-400 text-xs">
-              If your LP tokens are staked in farms, use the "Staking Recovery" tab above.
-            </p>
-            <p className="text-gray-400 text-xs mt-1">
-              Staked LP tokens won't appear here because they're locked in the MiniChef contract.
-            </p>
-          </div>
         </div>
       )}
     </div>
